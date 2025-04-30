@@ -60,98 +60,36 @@ class TemplateEnvWrapper(BaseEnvWrapper):
         ids = [x.stem for x in Path(self.env.chronics_handler.path).glob("*") if x.is_dir()]
         return len(ids), ids
 
+        
     def process_agent_action(self, action) -> BaseAction:
-        """
-        2025-04-30
-        修正充放电方向、效率补偿，并防止过充/过放越界
-        - act > 0：电网 -> 电池（充电，power_env > 0）
-        - act < 0：电池 -> 电网（放电，power_env < 0）
-        """
-        obs = self.tracker.state
-        # 假设环境步长为 1 小时；若非，则从 env 或配置中读 delta_t
-        delta_t = 1.0
+    
+        
+        max_charge = self.env.action_space.storage_max_p_absorb  
+        max_discharge = self.env.action_space.storage_max_p_prod  
 
-        battery_params = [
-            {
-                "max_charge_power": 7.5,  # MW
-                "max_discharge_power": 7.5,  # MW
-                "capacity": 15.0,  # MWh
-                "charge_eff": 0.95,
-                "discharge_eff": 0.95
-            },
-            {
-                "max_charge_power": 3.5,
-                "max_discharge_power": 3.5,
-                "capacity": 7.0,
-                "charge_eff": 0.95,
-                "discharge_eff": 0.95
-            }
-        ]
+        storage_actions = []
+        for storage_id in [0, 1]:  
+            action_val = action[storage_id]
 
-        action = np.clip(action, -1.0, 1.0)
-        set_storage = []
+            action_val = np.clip(action_val, -2.0, 2.0)
 
-        for i, act in enumerate(action):
-            params = battery_params[i]
-            cap = params["capacity"]
-            soc = obs.storage_charge[i] / cap  # 0 … 1
-            e_now = obs.storage_charge[i]
-
-            # 0) 动作太小忽略
-            if abs(act) < 0.01:
-                set_storage.append([i, 0.0])
-                soc_now = soc * cap
-                print(f"[Step Debug] B{i}: Skipped. SOC={soc_now:.3f} MWh, Action too small.")
-                continue
-
-            # 1) JHT 的 SOC 限幅方法
-            if soc > 23 / 24:
-                act = np.clip(act, -1.0, (1 - soc) * 24)
-            elif soc < 1 / 24:
-                act = np.clip(act, -soc * 24, 1.0)
-            else:
-                act = np.clip(act, -1.0, 1.0)
-
-            '''
-            #2) 理想功率计算（含效率）
-                if act > 0:
-                    p_grid = act * params["max_charge_power"]
-                    ideal_power = p_grid * params["charge_eff"]
-                elif act < 0:
-                    p_batt = (-act) * params["max_discharge_power"]
-                    ideal_power = -p_batt * params["discharge_eff"]
-                else:
-                    ideal_power = 0.0
-            '''
-            #简化为以下格式（输出值是一样的）
-            ideal_power = p_grid = act * params["max_charge_power"] * params["charge_eff"]
-
-            # 2) 能量增量 (MWh)
-            delta_e = ideal_power * delta_t
-
-            # 3) 过放/过充限制在 [−当前能量, 容量−当前能量]
-            e_min = - e_now
-            e_max = cap - e_now
-            safe_delta_e = float(np.clip(delta_e, e_min, e_max))
-
-            # 4) 实际功率，再次校验不超过单步最大功率
-            actual_power = safe_delta_e / delta_t
-            if actual_power > 0:
-                actual_power = min(actual_power, params["max_charge_power"])
-            else:
-                actual_power = max(actual_power, -params["max_discharge_power"])
-
-            # 如果你的环境对符号有特殊约定，这里可以翻转：
-            power_env = actual_power
-            # power_env = -actual_power  # 如果环境“正值为放电、负值为充电”，打开这一行
-
-            set_storage.append([i, power_env])
-
-            # Debug 打印，方便查崩溃前的 SOC／功率值
-            print(f"[Step Debug] B{i}: SOC={e_now:.3f} MWh, ideal_P={ideal_power:.3f} MW, "
-                  f"safe_dE={safe_delta_e:.3f} MWh -> actual_P={power_env:.3f} MW")
-
-        return self.env.action_space({"set_storage": set_storage})
+            if -1 <= action_val < 0:
+                
+                charge_p = abs(action_val) * max_charge[storage_id]
+                storage_actions.append((storage_id, -charge_p))  
+            
+            elif 0 < action_val <= 1:
+                
+                discharge_p = action_val * max_discharge[storage_id]
+                storage_actions.append((storage_id, discharge_p))
+            
+            else:  
+                
+                storage_actions.append((storage_id, 0.0))
+                print(f"Battery {storage_id} do nothing.")
+                
+        action = self.env.action_space({"set_storage": storage_actions})
+        return action
 
 
     def convert_observation(self, observation: BaseObservation) -> np.ndarray:
@@ -221,7 +159,10 @@ class TemplateEnvWrapper(BaseEnvWrapper):
         Keep stepping through environment until agent is activated again (or episode ends)
         """
         while not self.tracker.done and not np.any(self.tracker.state.rho >= self.rho_threshold):
-            action_ = self.env.action_space({})  # Do Nothing
+
+            action_ = self.env.action_space({"set_storage": [(0, 0.0),(1, 0.0)]})
+
+            #action_ = self.env.action_space({})  # Do Nothing
             obs, reward, done, info = self.env.step(action_)
             self.tracker.step(obs, reward, done, info)
 
