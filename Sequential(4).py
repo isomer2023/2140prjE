@@ -27,10 +27,10 @@ from copy import deepcopy
 from grid2op.Observation import BaseObservation
 
 def run(env_name: str = r"E:\202504\2140prjE\l2rpn_case14_storage_\l2rpn_case14_storage_train", agent:Literal['DDPG','TD3']="DDPG",
-        n_active:int=5000, replay_size:int=10000, rho_threshold:float=0.95, stage:Literal["TRAIN","VALIDATE","TEST"]="TRAIN", 
+        n_active:int=5000, replay_size:int=10000, rho_threshold:float=0.95, stage:Literal["TRAIN","VALIDATE","TEST"]="TRAIN",
         batch_size:int=32, seed:int=0, verbose:bool=False) -> Tuple[float]:
     """
-    Run one Reinforcement Learning (RL) loop. 
+    Run one Reinforcement Learning (RL) loop.
 
     Args:
         env_name (str, optional): Name of Grid2Op Environment to use, will be downloaded automatically (if it exists). Defaults to "l2rpn_case14_sandbox".
@@ -59,7 +59,7 @@ def run(env_name: str = r"E:\202504\2140prjE\l2rpn_case14_storage_\l2rpn_case14_
         )
         print("Environment initialized successfully!")
         obs = raw_env.reset()
-       
+
         print("Empty Load Success:", obs)
 
     except Exception as e:
@@ -72,7 +72,7 @@ def run(env_name: str = r"E:\202504\2140prjE\l2rpn_case14_storage_\l2rpn_case14_
                              rho_threshold=rho_threshold,
                              verbose=verbose,
                              env_kwargs={"allow_detachment":True})
-    
+
     n_eps, ep_ids = env.get_env_size()
     # TODO: Figure out what Obervation / Action size is appropriate
     # Hint: You will need to implement this inside TemplateEnvWrapper
@@ -114,7 +114,7 @@ def run(env_name: str = r"E:\202504\2140prjE\l2rpn_case14_storage_\l2rpn_case14_
     # >> Replay Buffer <<
     buffer = ReplayBuffer(max_size=replay_size, obs_dim=OBS_DIM,
                           gamma=agent.gamma, N_steps=agent.n_steps)
-    
+
     ep_no = 0
     total_steps = 0
 
@@ -132,17 +132,16 @@ def run(env_name: str = r"E:\202504\2140prjE\l2rpn_case14_storage_\l2rpn_case14_
         print(f"\nStarting Episode {ep_no} | Scenario ID: {ep_id}")
 
         obs_vec, info, terminated, truncated = env.reset(options={"time serie id": ep_id})
-        
+
         print(f"Initial Battery SOCs: Battery 1 = {env.tracker.state.storage_charge[0]}, Battery 2 = {env.tracker.state.storage_charge[1]}")
 
         done = terminated or truncated
-       
+
         ep_steps, ep_reward = 0, info["reward"]
 
         while not done:
             action = agent.act(obs_vec)
             print(f"Step {ep_steps} | Action: {action}")
-            print(f"In action: Battery SOCs: Battery 1 = {env.tracker.state.storage_charge[0]}, Battery 2 = {env.tracker.state.storage_charge[1]}")
             next_obs_vec, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
 
@@ -165,7 +164,7 @@ def run(env_name: str = r"E:\202504\2140prjE\l2rpn_case14_storage_\l2rpn_case14_
                 print(f"truncated: Battery SOCs: Battery 1 = {env.tracker.state.storage_charge[0]}, Battery 2 = {env.tracker.state.storage_charge[1]}")
             if ep_steps > max_steps_survived:
                 max_steps_survived = ep_steps
-            
+
             obs_vec = next_obs_vec
 
         ep_rewards.append(ep_reward)
@@ -179,18 +178,11 @@ def run(env_name: str = r"E:\202504\2140prjE\l2rpn_case14_storage_\l2rpn_case14_
         print(f"Failed Episodes: {num_failed}")
         print(f"Maximum Steps Survived: {max_steps_survived}")
         print("=============================\n")
-    
+
     ep_rewards[ep_no] = ep_reward
-    
+
     return np.mean(ep_rewards)
 
 
 if __name__ == "__main__":
     auto_cli(run)
-
-
-#            storage_charge = env.tracker.state.storage_charge
-#            if storage_charge[0] == 0 or storage_charge[1] == 0:
-#                penalty = -5.0  
-#                reward += penalty
-#                print(f"⚠️  Battery SOCs are both 0. Applying penalty: {penalty}")
