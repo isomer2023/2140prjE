@@ -19,29 +19,31 @@ from pyexpat import features
 
 from .Utilities import VanillaTracker
 
+
 class TemplateEnvWrapper(BaseEnvWrapper):
 
     def __init__(
-        self,
-        env_name:str,
-        backend:Backend,
-        env_kwargs:dict,
-        *args,
-        rho_threshold:float=0.95,
-        verbose:bool=False,
-        **kwargs
+            self,
+            env_name: str,
+            backend: Backend,
+            env_kwargs: dict,
+            *args,
+            rho_threshold: float = 0.95,
+            verbose: bool = False,
+            **kwargs
     ):
         if not isinstance(backend, Backend):
             try:
                 backend = backend()
             except TypeError:
-                print("A backend instance was not provided and initialisation failed. Please provide a valid backend or backend class")
+                print(
+                    "A backend instance was not provided and initialisation failed. Please provide a valid backend or backend class")
                 return
         super().__init__(env_name=env_name, backend=backend, grid2op_params=env_kwargs)
         # >> Simple Attributes <<
         # Used for tracking variables across an episode / step
-        self.rho_threshold = rho_threshold # Fraction of thermal limit beyond which agent is activated
-        self.tracker:VanillaTracker = VanillaTracker() # Utility to help keep track of reward, observation, etc.
+        self.rho_threshold = rho_threshold  # Fraction of thermal limit beyond which agent is activated
+        self.tracker: VanillaTracker = VanillaTracker()  # Utility to help keep track of reward, observation, etc.
         self.verbose = verbose
 
     def get_env_size(self) -> tuple[int, list[str]]:
@@ -93,26 +95,41 @@ class TemplateEnvWrapper(BaseEnvWrapper):
             params = battery_params[i]
             cap = params["capacity"]
             soc = obs.storage_charge[i] / cap  # 0 … 1
+            e_now = obs.storage_charge[i]
 
-            # 1) 根据 act 计算网侧或电池侧理想功率（不做限制）
-            if act > 0:
-                # 充电：网侧给出的功率
-                p_grid = act * params["max_charge_power"]
-                # 电池实际吸收
-                ideal_power = p_grid * params["charge_eff"]
-            elif act < 0:
-                # 放电：电池端释放功率
-                p_batt = (-act) * params["max_discharge_power"]
-                # 实际网侧接收
-                ideal_power = - p_batt * params["discharge_eff"]
+            # 0) 动作太小忽略
+            if abs(act) < 0.01:
+                set_storage.append([i, 0.0])
+                soc_now = soc * cap
+                print(f"[Step Debug] B{i}: Skipped. SOC={soc_now:.3f} MWh, Action too small.")
+                continue
+
+            # 1) JHT 的 SOC 限幅方法
+            if soc > 23 / 24:
+                act = np.clip(act, -1.0, (1 - soc) * 24)
+            elif soc < 1 / 24:
+                act = np.clip(act, -soc * 24, 1.0)
             else:
-                ideal_power = 0.0
+                act = np.clip(act, -1.0, 1.0)
+
+            '''
+            #2) 理想功率计算（含效率）
+                if act > 0:
+                    p_grid = act * params["max_charge_power"]
+                    ideal_power = p_grid * params["charge_eff"]
+                elif act < 0:
+                    p_batt = (-act) * params["max_discharge_power"]
+                    ideal_power = -p_batt * params["discharge_eff"]
+                else:
+                    ideal_power = 0.0
+            '''
+            #简化为以下格式（输出值是一样的）
+            ideal_power = p_grid = act * params["max_charge_power"] * params["charge_eff"]
 
             # 2) 能量增量 (MWh)
             delta_e = ideal_power * delta_t
 
             # 3) 过放/过充限制在 [−当前能量, 容量−当前能量]
-            e_now = obs.storage_charge[i]
             e_min = - e_now
             e_max = cap - e_now
             safe_delta_e = float(np.clip(delta_e, e_min, e_max))
@@ -136,7 +153,8 @@ class TemplateEnvWrapper(BaseEnvWrapper):
 
         return self.env.action_space({"set_storage": set_storage})
 
-    def convert_observation(self, observation:BaseObservation) -> np.ndarray:
+
+    def convert_observation(self, observation: BaseObservation) -> np.ndarray:
         features = np.concatenate([
             observation.storage_charge,
             observation.rho,
@@ -158,8 +176,6 @@ class TemplateEnvWrapper(BaseEnvWrapper):
                 """
         return features.astype(np.float32)
 
-
-    
     def step(self, agent_action) -> tuple[np.ndarray, float, bool, bool, dict]:
         """
         Provides an interface to interact with the wrapped Grid2Op environment.
@@ -168,49 +184,52 @@ class TemplateEnvWrapper(BaseEnvWrapper):
             action (int): integer representation of the action
 
         Returns:
-            tuple[np.ndarray, float, bool, dict]: 
+            tuple[np.ndarray, float, bool, dict]:
             Observation: vector or graph representation of the environment state
             reward: total accumulated reward over the non active timesteps
             done: if the scenario finished
             info: regular grid2op info. additionally provides a mask for illegal actions, as well as the number of steps taken in the grid2op environment
-        """        
+        """
         self.tracker.reset_step()
 
         action = self.process_agent_action(agent_action)
-        
+
         # >> Execute Agent's Action <<
         obs, reward, done, info = self.env.step(action)
         self.tracker.step(obs, reward, done, info)
-        
+
         # >> Step While Safe <<
         # Step through environment so long as line loading is under threshold
         self._step_while_safe()
 
-        self.tracker.info.update({"time":time.perf_counter() - self.tracker.start})
+        self.tracker.info.update({"time": time.perf_counter() - self.tracker.start})
         obs_vec = self.convert_observation(self.tracker.state)
 
         terminated, truncated = self._get_terminated_truncated()
-        return (obs_vec, # Vector Representation of the Observation
-                self.tracker.tot_reward, # Reward accumulated, can be a sum if we include heuristics, otherwise is just the reward from env.step(...)
-                terminated, # Whether the episode was prematurely ended, i.e. if there's a blackout or powerflow diverges
-                truncated, # Whether the episode was truncated, i.e. the agent reached the max time steps for the environment
-                self.tracker.info # Additional information, stored in a dictionary
-        ) 
-        
+        return (obs_vec,  # Vector Representation of the Observation
+                self.tracker.tot_reward,
+                # Reward accumulated, can be a sum if we include heuristics, otherwise is just the reward from env.step(...)
+                terminated,
+                # Whether the episode was prematurely ended, i.e. if there's a blackout or powerflow diverges
+                truncated,
+                # Whether the episode was truncated, i.e. the agent reached the max time steps for the environment
+                self.tracker.info  # Additional information, stored in a dictionary
+                )
+
     def _step_while_safe(self):
         """
         Keep stepping through environment until agent is activated again (or episode ends)
         """
         while not self.tracker.done and not np.any(self.tracker.state.rho >= self.rho_threshold):
-            action_ = self.env.action_space({}) # Do Nothing
+            action_ = self.env.action_space({})  # Do Nothing
             obs, reward, done, info = self.env.step(action_)
             self.tracker.step(obs, reward, done, info)
 
-
-    def reset(self, seed:int|None=None, options:RESET_OPTIONS_TYPING={}) -> Tuple[np.ndarray, np.ndarray, bool, bool]:
+    def reset(self, seed: int | None = None, options: RESET_OPTIONS_TYPING = {}) -> Tuple[
+        np.ndarray, np.ndarray, bool, bool]:
         """
         Reset the environment, this will start a new episode
-        
+
         Returns:
             np.ndarray | Data | Any: observation, type depends
                 on conversion routine.
@@ -227,22 +246,21 @@ class TemplateEnvWrapper(BaseEnvWrapper):
         else:
             ep_id = self.env.chronics_handler.get_name()
             options["time serie id"] = ep_id
-        
+
         # >> Reset Environment to Target Episode <<
         # NOTE: Options can overwrite the init_ts
         self.tracker.reset_episode(
             self.env.reset(options=options)
         )
-        
+
         obs_vec = self.convert_observation(self.tracker.state)
         terminated, truncated = self._get_terminated_truncated()
         return (
-            obs_vec, # Obs
-            dict(reward=0), # Info
+            obs_vec,  # Obs
+            dict(reward=0),  # Info
             terminated, truncated
-            )
-    
-    
+        )
+
     def _get_terminated_truncated(self) -> Tuple[bool, bool]:
         """
         Terminated: Episode ended prematurely (game over)
@@ -258,10 +276,10 @@ class TemplateEnvWrapper(BaseEnvWrapper):
         truncated = done and (step == env_max_step)
         return terminated, truncated
 
-    def set_id(self, chronic_id:int|str):
+    def set_id(self, chronic_id: int | str):
         self.env.set_id(chronic_id)
-    
-    def seed(self, seed:int) -> None:
+
+    def seed(self, seed: int) -> None:
         self.env.seed(seed=seed)
 
     def max_episode_duration(self) -> int:
