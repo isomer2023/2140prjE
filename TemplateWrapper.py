@@ -60,6 +60,7 @@ class TemplateEnvWrapper(BaseEnvWrapper):
 
     def process_agent_action(self, action) -> BaseAction:
         """
+        2025-04-30
         修正充放电方向、效率补偿，并防止过充/过放越界
         - act > 0：电网 -> 电池（充电，power_env > 0）
         - act < 0：电池 -> 电网（放电，power_env < 0）
