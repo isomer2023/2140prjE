@@ -1,17 +1,17 @@
     def process_agent_action(self, action) -> BaseAction:
         """
-        250430 JHT 修正充放电方向、效率补偿，并防止过充/过放越界
+        修正充放电方向、效率补偿，并防止过充/过放越界。
         - act > 0：电网 -> 电池（充电，power_env > 0）
         - act < 0：电池 -> 电网（放电，power_env < 0）
         """
         obs = self.tracker.state
-        # 假设环境步长为 1 小时；若非，则从 env 或配置中读 delta_t
+        delta_t = 5.0 / 60.0  # 5 分钟时间步（小时）
 
         battery_params = [
             {
-                "max_charge_power": 7.5,  # MW
-                "max_discharge_power": 7.5,  # MW
-                "capacity": 15.0,  # MWh
+                "max_charge_power": 7.5,
+                "max_discharge_power": 7.5,
+                "capacity": 15.0,
                 "charge_eff": 0.95,
                 "discharge_eff": 0.95
             },
@@ -27,46 +27,56 @@
         action = np.clip(action, -1.0, 1.0)
         set_storage = []
 
-        for i, act in enumerate(action):
+        for i, raw_act in enumerate(action):
             params = battery_params[i]
             cap = params["capacity"]
-            soc = obs.storage_charge[i] / cap  # 0 … 1
-
-            # 0) JHT's method
-            if soc > 23 / 24:
-                action = np.clip(action, -1.0, (1 - soc) * 24)
-            elif soc < 1 / 24:
-                action = np.clip(action, -soc * 24, 1.0)
-            else:
-                action = np.clip(action, -1.0, 1.0)
-
-            # 1) 根据 act 计算网侧或电池侧理想功率（不做限制）
-
-            ideal_power = act * params["max_charge_power"] * params["charge_eff"]
-
-
-            # 2) 能量增量 (MWh)
-            delta_e = ideal_power
-
-            # 3) 过放/过充限制在 [−当前能量, 容量−当前能量]
             e_now = obs.storage_charge[i]
-            e_min = - e_now
+            soc = e_now / cap
+
+            act = raw_act
+
+            # 0) 是否跳过该动作？如 abs(act) 很小则忽略
+            if abs(act) < 0.01:
+                set_storage.append([i, 0.0])
+                print(f"[Step Debug] B{i}: Skipped. SOC={e_now:.3f} MWh, Action too small.")
+                continue
+
+            # 1) JHT 的 SOC 限幅方法（防止学到越界动作）
+            if soc > 23 / 24:
+                act = np.clip(act, -1.0, (1 - soc) * 24)
+            elif soc < 1 / 24:
+                act = np.clip(act, -soc * 24, 1.0)
+            else:
+                act = np.clip(act, -1.0, 1.0)
+
+            # 2) 根据 act 计算“理想”功率
+            if act > 0:
+                p_grid = act * params["max_charge_power"]
+                ideal_power = p_grid * params["charge_eff"]
+            elif act < 0:
+                p_batt = (-act) * params["max_discharge_power"]
+                ideal_power = -p_batt * params["discharge_eff"]
+            else:
+                ideal_power = 0.0
+
+            # 3) 能量变化 ΔE（单位 MWh）
+            delta_e = ideal_power * delta_t
+
+            # 4) 钳制 ΔE，防止过充过放
+            e_min = -e_now
             e_max = cap - e_now
             safe_delta_e = float(np.clip(delta_e, e_min, e_max))
 
-            # 4) 实际功率，再次校验不超过单步最大功率
-            actual_power = safe_delta_e
+            # 5) 计算实际功率（MW）
+            actual_power = safe_delta_e / delta_t
             if actual_power > 0:
                 actual_power = min(actual_power, params["max_charge_power"])
             else:
                 actual_power = max(actual_power, -params["max_discharge_power"])
 
-            # 如果你的环境对符号有特殊约定，这里可以翻转：
             power_env = actual_power
-
             set_storage.append([i, power_env])
 
-            # Debug 打印，方便查崩溃前的 SOC／功率值
             print(f"[Step Debug] B{i}: SOC={e_now:.3f} MWh")
 
         return self.env.action_space({"set_storage": set_storage})
