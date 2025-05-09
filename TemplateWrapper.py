@@ -28,7 +28,7 @@ class TemplateEnvWrapper(BaseEnvWrapper):
             backend: Backend,
             env_kwargs: dict,
             *args,
-            rho_threshold: float = 0.95,
+            rho_threshold: float,
             verbose: bool = False,
             **kwargs
     ):
@@ -47,20 +47,12 @@ class TemplateEnvWrapper(BaseEnvWrapper):
         self.verbose = verbose
 
     def get_env_size(self) -> tuple[int, list[str]]:
-        """
-        Deduces the number of episodes present in a locally-stored Grid2Op Environment.
 
-        Args:
-            env (grid2op.Environment): Path on disk where Environment is stored
-
-        Returns:
-            int: Number of unique episodes in the Environment's chronics
-            list[int] (optional): List of Episode IDs
-        """
         ids = [x.stem for x in Path(self.env.chronics_handler.path).glob("*") if x.is_dir()]
+
         return len(ids), ids
 
-        
+    '''
     def process_agent_action(self, action) -> BaseAction:
     
         
@@ -74,45 +66,82 @@ class TemplateEnvWrapper(BaseEnvWrapper):
             action_val = np.clip(action_val, -2.0, 2.0)
 
             if -1 <= action_val < 0:
-                
-                charge_p = abs(action_val) * max_charge[storage_id]
-                storage_actions.append((storage_id, -charge_p))  
+                storage_actions.append((storage_id, 0.0))
+                #discharge_p = action_val * max_charge[storage_id]
+                #storage_actions.append((storage_id, discharge_p))  
             
             elif 0 < action_val <= 1:
-                
-                discharge_p = action_val * max_discharge[storage_id]
-                storage_actions.append((storage_id, discharge_p))
+                storage_actions.append((storage_id, 0.0))
+                #charge_p = action_val * max_discharge[storage_id]
+                #storage_actions.append((storage_id, charge_p))
             
             else:  
                 
                 storage_actions.append((storage_id, 0.0))
-                print(f"Battery {storage_id} do nothing.")
+                #print(f"Battery {storage_id} do nothing.")
                 
         action = self.env.action_space({"set_storage": storage_actions})
         return action
 
+        '''
+
 
     def convert_observation(self, observation: BaseObservation) -> np.ndarray:
+        SOC  = observation.storage_charge/observation.storage_Emax
+        rho  = observation.rho/2
+        gen  = observation.gen_p/89
+        load = observation.load_p/15
+        topo = observation.topo_vect
+        
+        topo_normalized = np.select(
+            [topo == -1, topo == 1, topo == 2],
+            [0.0, 0.5, 1.0],
+            default=0.0
+        ).astype(np.float32)
+
         features = np.concatenate([
-            observation.storage_charge,
-            observation.rho,
-            observation.gen_p,
-            observation.gen_q,
-            observation.load_p,
-            observation.load_q,
-            observation.gen_v
+            SOC,
+            rho,
+            gen,
+            load,
+            topo_normalized
         ])
-        """
-                Convert a Grid2Op observation of the environment's state into a form the
-                agent can understand.
-
-                Args:
-                    observation (BaseObservation): Observation of grid's state
-
-                Returns:
-                    numpy.ndarray: Numpy array that is the input to the agent (will be converted to torch inside the agent)
-                """
         return features.astype(np.float32)
+
+    def process_agent_action(self, action) -> BaseAction:
+
+        max_charge = self.env.action_space.storage_max_p_absorb
+        max_discharge = self.env.action_space.storage_max_p_prod
+
+        storage_actions = []
+        for storage_id in [0, 1]:
+            action_val = action[storage_id]
+
+            action_val = np.clip(action_val, -2.0, 2.0)
+
+            if -1 <= action_val < 0: # Charge
+
+                charge_p = abs(action_val) * max_charge[storage_id]
+                storage_actions.append((storage_id, charge_p))
+                #storage_actions.append((storage_id, 0.0))
+
+            elif 0 < action_val <= 1: # Discharge
+
+                discharge_p = action_val * max_discharge[storage_id]
+                storage_actions.append((storage_id, -discharge_p))
+                #storage_actions.append((storage_id, 0.0))
+
+            else:
+
+                storage_actions.append((storage_id, 0.0))
+                #print(f"Battery {storage_id} do nothing.")
+
+        action = self.env.action_space({"set_storage": storage_actions})
+        return action
+
+
+
+
 
     def step(self, agent_action) -> tuple[np.ndarray, float, bool, bool, dict]:
         """
@@ -160,9 +189,9 @@ class TemplateEnvWrapper(BaseEnvWrapper):
         """
         while not self.tracker.done and not np.any(self.tracker.state.rho >= self.rho_threshold):
 
-            action_ = self.env.action_space({"set_storage": [(0, 0.0),(1, 0.0)]})
+            #action_ = self.env.action_space({"set_storage": [(0, 0.0),(1, 0.0)]})
 
-            #action_ = self.env.action_space({})  # Do Nothing
+            action_ = self.env.action_space({})  # Do Nothing
             obs, reward, done, info = self.env.step(action_)
             self.tracker.step(obs, reward, done, info)
 
