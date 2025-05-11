@@ -34,7 +34,7 @@ import pandas as pd
 
 
 def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg2140/l2rpn_case14_storage_/l2rpn_case14_storage_train", agent:Literal['DDPG','TD3']="DDPG",
-        n_active:int=300000, replay_size:int=10000, rho_threshold:float=0.4, stage:Literal["TRAIN","VALIDATE","TEST"]="TRAIN", 
+        n_active:int=300000, replay_size:int=10000, rho_threshold:float=0, stage:Literal["TRAIN","VALIDATE","TEST"]="TRAIN", 
         batch_size:int = 128, seed:int=0, verbose:bool=False) -> Tuple[float]:
     
     #import excel files
@@ -216,7 +216,7 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
             if stage.upper() == "TRAIN":
                 if max_current_rho < max_prev_rho and max_current_rho > 0:
                     if -1 <= action[0] <= 1 or -1 <= action[1] <= 1:
-                        reward_rho = (max_prev_rho - max_current_rho) * 10
+                        reward_rho = (max_prev_rho - max_current_rho) * 1
                         reward += reward_rho
             
             
@@ -255,7 +255,7 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
             
             if stage.upper() == "TRAIN":
                 if ep_steps - previous_steps ==1:
-                    reward += 100
+                    reward += 10
                 
                 ep_reward += reward
             
@@ -325,7 +325,7 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
                     
                     if stage.upper() == "TRAIN":
                         
-                        ep_reward = (ep_steps - previous_steps) *20
+                        ep_reward = (ep_steps - previous_steps) *2
                     
 
                     num_improved +=1
@@ -363,12 +363,25 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
             survival_rate = num_survived100
             tot_survival_rate = num_survived / total_episodes *100
 
+            if num_improved == 0:
+                average_improved_steps = 0
+            else:
+                average_improved_steps =  improved_steps/num_improved
 
-            average_improved_steps =  improved_steps/num_improved
-            average_improved_steps100 =  improved_steps100/num_improved100
+            if num_improved100 == 0:
+                average_improved_steps100 = 0
+            else:
+                average_improved_steps100 =  improved_steps100/num_improved100
 
-            average_regressed_steps = regressed_steps/num_regressed
-            average_regressed_steps100 = regressed_steps100/num_regressed100
+            if num_regressed == 0:
+                average_regressed_steps = 0
+            else:
+                average_regressed_steps = regressed_steps/num_regressed
+
+            if num_regressed100 == 0:
+                average_regressed_steps100 = 0
+            else:
+                average_regressed_steps100 = regressed_steps100/num_regressed100
 
 
             improved_rate = num_improved100
