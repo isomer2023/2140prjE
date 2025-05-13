@@ -33,9 +33,9 @@ import pandas as pd
 
 
 
-def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg2140/l2rpn_case14_storage_/l2rpn_case14_storage_train", agent:Literal['DDPG','TD3']="DDPG",
-        n_active:int=300000, replay_size:int=10000, rho_threshold:float=0, stage:Literal["TRAIN","VALIDATE","TEST"]="TRAIN", 
-        batch_size:int = 128, seed:int=0, verbose:bool=False) -> Tuple[float]:
+def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg2140/l2rpn_case14_storage_/l2rpn_case14_storage_test", agent:Literal['DDPG','TD3']="DDPG",
+        n_active:int=300000, replay_size:int=100000, rho_threshold:float=0, stage:Literal["TRAIN","VALIDATE","TEST"]="TEST", 
+        batch_size:int = 256, seed:int=0, verbose:bool=False) -> Tuple[float]:
     
     #import excel files
     train_filename = "scenario_records_train.xlsx"
@@ -109,18 +109,18 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
         obs_dim=OBS_DIM,
         act_dim=ACT_DIM,
         act_limit=ACT_LIMIT,
-        pi_hidden_sizes=[1024, 1024],
-        q_hidden_sizes=[1024, 1024],
+        pi_hidden_sizes=[256, 128],
+        q_hidden_sizes=[256, 128],
         activation_function=nn.Tanh,
         optim_pi=optim.Adam,
         optim_q=optim.Adam,
         lr_pi=1e-4,
         lr_q=1e-4,
         device='cpu',
-        gamma=0.95,
+        gamma=0.9,
         tau=0.005,
-        noise_scale=0.3,
-        n_steps=10
+        noise_scale=0.1,
+        n_steps=5
     ))
     
 
@@ -155,15 +155,17 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
     regressed_steps = 0
     regressed_steps100 = 0
 
+    if stage.upper() == "TRAIN" or "TEST":
+        agent.load_checkpoint(Path("."), suffix="_final")
 
-
-
-    while total_episodes < 5500:
+    while total_episodes < 107:
     #while total_steps < n_active:
         if agent.noise_scale > 0:
-            agent.noise_scale += -0.001
+            agent.noise_scale += -0.0005
+            #print(f"Agent.noise_scale {agent.noise_scale}")
         else:
             agent.noise_scale = 0
+            #print(f"Agent.noise_scale {agent.noise_scale}")
 
         ep_pos = ep_no % n_eps
         ep_id = ep_ids[ep_pos]
@@ -212,51 +214,53 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
             storage_charge = env.tracker.state.storage_charge
             storage_Emax = env.tracker.state.storage_Emax
             
-            
             if stage.upper() == "TRAIN":
                 if max_current_rho < max_prev_rho and max_current_rho > 0:
                     if -1 <= action[0] <= 1 or -1 <= action[1] <= 1:
-                        reward_rho = (max_prev_rho - max_current_rho) * 1
+                        reward_rho = (max_prev_rho - max_current_rho) * 100
                         reward += reward_rho
             
-            
 
-            
+            '''
             # 惩罚 Battery 0
             if storage_charge[0] < 0.1 and 0 < action[0] <= 1:
-                reward += -0.2
+                reward += -1.5
                 #print("  Battery 0 is empty and agent tries to discharge. Penalty applied.")
 
             if storage_charge[0] > 14.9 and -1 <= action[0] < 0:  
-                reward += -0.2
+                reward += -1.5
                 #print("  Battery 0 is full and agent tries to charge. Penalty applied.")
 
             # 惩罚 Battery 1
             if storage_charge[1] < 0.1 and 0 < action[0] <= 1:
-                reward += -0.2
+                reward += -1.5
                 #print("  Battery 1 is empty and agent tries to discharge. Penalty applied.")
 
             if storage_charge[1] > 6.9 and -1 <= action[0] < 0:  
-                reward += -0.2
+                reward += -1.5
                 #print("  Battery 1 is full and agent tries to charge. Penalty applied.")
             
            
             if np.max(env.tracker.state.rho >= 1.2):
                 if (action[0] > 1 or action[0] < -1) and (action[1] >1 or action[1] < -1):
-                    reward += -0.3
+                    reward += -30
                     #print("  High line loading detected (rho ≥ 1.2). agent do nothing.Penalty applied.")
 
 
             if np.max(env.tracker.state.rho >= 1):
                 if (action[0] > 1 or action[0] < -1) and (action[1] >1 or action[1] < -1):
-                    reward += -0.3
+                    reward += -30
                     #print("  High line loading detected (rho ≥ 1). agent do nothing.Penalty applied.")
+
+
+            if np.max(env.tracker.state.rho >= 0.8):
+                if (action[0] > 1 or action[0] < -1) and (action[1] >1 or action[1] < -1):
+                    reward += -30
+                    #print("  High line loading detected (rho ≥ 0.9). agent do nothing.Penalty applied.")
             
-            
+            '''
+
             if stage.upper() == "TRAIN":
-                if ep_steps - previous_steps ==1:
-                    reward += 10
-                
                 ep_reward += reward
             
             ep_steps += 1
@@ -273,10 +277,9 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
                     improved_steps100 += delta_steps
 
                     
+
                     if stage.upper() == "TRAIN":
-                        
-                        ep_reward += (ep_steps - previous_steps) *1
-                    
+                        ep_reward += (ep_steps - previous_steps) *100
 
                     num_improved +=1
                     num_improved100 +=1
@@ -290,17 +293,18 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
 
                     print(f"Regressed!{delta_steps}")
                     
-                    
+
                     if stage.upper() == "TRAIN":
-                        
-                        ep_reward += (ep_steps - previous_steps) *1
-                    
+                        ep_reward = 0
+                        ep_reward += (ep_steps - previous_steps) *50
 
                     num_regressed +=1
                     num_regressed100 +=1
                 else:
                     print(f"Equal")
-                    
+                    if stage.upper() == "TRAIN":
+                        ep_reward = 0
+
                     num_equal +=1
                     num_equal100 +=1
 
@@ -322,19 +326,17 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
                     improved_steps100 += delta_steps
 
                     
-                    
+
                     if stage.upper() == "TRAIN":
-                        
-                        ep_reward = (ep_steps - previous_steps) *2
-                    
+                        ep_reward += (ep_steps - previous_steps) *100
 
                     num_improved +=1
                     num_improved100 +=1
                     
                 else:
                     print(f"Equal")
-                    
-
+                    if stage.upper() == "TRAIN":
+                        ep_reward = 0
                     num_equal +=1
                     num_equal100 +=1
                     
@@ -359,7 +361,7 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
         ep_no += 1
         total_episodes += 1
 
-        if total_episodes % 100 == 0:
+        if total_episodes % 107 == 0:
             survival_rate = num_survived100
             tot_survival_rate = num_survived / total_episodes *100
 
@@ -439,7 +441,9 @@ def run(env_name: str = "/Users/yanzeyang/Desktop/Group5RL-eg2140/Group5RL-eg214
         df.to_excel(filename, index=False)
         print(f"\nScenario records saved to {filename}")
     '''
-    
+    if stage.upper() == "TRAIN":
+        agent.save_checkpoint(Path("."), suffix="_final")
+
     return np.mean(ep_rewards)
 
 

@@ -88,23 +88,15 @@ class TemplateEnvWrapper(BaseEnvWrapper):
 
     def convert_observation(self, observation: BaseObservation) -> np.ndarray:
         SOC  = observation.storage_charge/observation.storage_Emax
-        rho  = observation.rho/2
+        rho  = observation.rho
         gen  = observation.gen_p/89
         load = observation.load_p/15
-        topo = observation.topo_vect
-        
-        topo_normalized = np.select(
-            [topo == -1, topo == 1, topo == 2],
-            [0.0, 0.5, 1.0],
-            default=0.0
-        ).astype(np.float32)
 
         features = np.concatenate([
             SOC,
             rho,
             gen,
-            load,
-            topo_normalized
+            load
         ])
         return features.astype(np.float32)
 
