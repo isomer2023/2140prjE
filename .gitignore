@@ -1,0 +1,53 @@
+# Virtual Environment
+.venv/
+.venv/*
+
+# VS Code
+.vscode/
+.vscode/*
+
+# Submodules
+lightsim2grid/*
+
+# Pycache
+__pycache__/
+__pycache__/*
+
+# ROCM
+rocm6.3_ubuntu24.04_py3.12_pytorch_release_2.4.0_CUSTOM/
+
+# PyEnv
+.python-version
+
+# Weights and Biases (wand)
+wandb/
+wandb/*
+
+# Runs
+runs/
+runs/*
+Configs/Sequential.yaml
+sequential.stats
+sequential_new_maint.stats
+
+# Jupyter
+.ipynb_checkpoints/
+.ipynb_checkpoints/*
+
+# Package Building
+build/
+build/*
+*.egg-info
+
+# data
+wandb_data/
+wandb_data/*
+
+# Figures
+Figures/
+Figures/*
+
+# Submodules
+lightsim2grid/
+Grid2Op/
+AgentEmporium/
