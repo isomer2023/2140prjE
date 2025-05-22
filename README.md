@@ -1,0 +1,1 @@
+Our project focuses on a specific scenario. In a 14-node distribution system, the System Operator(SO) needs to take charge of two BESSs in the system under severe incidents. Agents will control the charge/discharge operation to minimize the Energy Not Supplied(ENS), and extend the survival time for the grid while avoiding large blackouts.
